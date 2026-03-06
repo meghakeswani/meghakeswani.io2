@@ -5,6 +5,90 @@
   <title>Can you spot yellow?</title>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,600;1,300;1,400&family=Cinzel+Decorative:wght@400&family=DM+Sans:wght@300;400&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+
+  <script>
+    let audioCtx = null;
+
+    // Continuous nodes for the "separation" whoosh sound
+    let whooshNoise = null, whooshBpf = null, whooshGain = null;
+
+    function unlockAudio() {
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // Build a looping noise -> bandpass -> gain chain that runs continuously
+      // We just modulate its gain and filter freq based on group velocity
+      const bufSize = audioCtx.sampleRate * 2;
+      const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+
+      whooshNoise = audioCtx.createBufferSource();
+      whooshNoise.buffer = buf;
+      whooshNoise.loop = true;
+
+      whooshBpf = audioCtx.createBiquadFilter();
+      whooshBpf.type = 'bandpass';
+      whooshBpf.frequency.value = 400;
+      whooshBpf.Q.value = 3;
+
+      // Second filter for richness
+      const hpf = audioCtx.createBiquadFilter();
+      hpf.type = 'highpass';
+      hpf.frequency.value = 200;
+
+      whooshGain = audioCtx.createGain();
+      whooshGain.gain.value = 0;
+
+      whooshNoise.connect(whooshBpf);
+      whooshBpf.connect(hpf);
+      hpf.connect(whooshGain);
+      whooshGain.connect(audioCtx.destination);
+      whooshNoise.start();
+    }
+
+    document.addEventListener('mousemove', unlockAudio, { once: true });
+    document.addEventListener('mousedown', unlockAudio);
+
+    // Called every frame with total speed across all groups (0 = still, high = fast separation)
+    function updateSeparationSound(totalSpeed) {
+      if (!audioCtx || !whooshGain) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const t = audioCtx.currentTime;
+      const targetGain = Math.min(totalSpeed * 0.012, 0.35);
+      const targetFreq = 300 + totalSpeed * 18;
+      whooshGain.gain.setTargetAtTime(targetGain, t, 0.05);
+      whooshBpf.frequency.setTargetAtTime(Math.min(targetFreq, 3000), t, 0.05);
+    }
+
+    function playReset() {
+      if (!audioCtx) return;
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const ctx = audioCtx;
+      const t = ctx.currentTime;
+      // Fade whoosh out immediately on reset
+      if (whooshGain) whooshGain.gain.setTargetAtTime(0, t, 0.05);
+      // Descending glass chime
+      [880, 660, 440].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t + i * 0.08);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.72, t + i * 0.08 + 0.65);
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.0001, t + i * 0.08);
+        gain.gain.linearRampToValueAtTime(0.22, t + i * 0.08 + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.08 + 0.9);
+        const delay = ctx.createDelay(1.0);
+        delay.delayTime.value = 0.04 + i * 0.02;
+        const fb = ctx.createGain(); fb.gain.value = 0.28;
+        delay.connect(fb); fb.connect(delay);
+        osc.connect(gain);
+        gain.connect(delay); gain.connect(ctx.destination);
+        delay.connect(ctx.destination);
+        osc.start(t + i * 0.08); osc.stop(t + i * 0.08 + 1.0);
+      });
+    }
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -137,6 +221,8 @@ let directions = [-1, 1, -1, 1];
 let groupStarts = [7, 15, 23, 31];
 let currentX = [];
 let currentY = [];
+let prevX = [];
+let prevY = [];
 
 function setup() {
   let cnv = createCanvas(1200, 750);
@@ -147,6 +233,8 @@ function setup() {
     originalX[g] = marginX + (groupStarts[g] + 1) * spacing;
     currentX[g] = originalX[g];
     currentY[g] = originalY;
+    prevX[g] = originalX[g];
+    prevY[g] = originalY;
   }
   strokeCap(ROUND);
 }
@@ -161,7 +249,11 @@ function draw() {
     line(x, 0, x, height);
   }
 
+  let totalSpeed = 0;
   for (let g = 0; g < 4; g++) {
+    prevX[g] = currentX[g];
+    prevY[g] = currentY[g];
+
     let noiseVal = noise(frameCount * 0.01, g * 100);
     let wanderX = map(noiseVal, 0, 1, -150, 150);
     let wanderY = map(noise(g * 50, frameCount * 0.01), 0, 1, -150, 150);
@@ -181,8 +273,22 @@ function draw() {
       currentX[g] += fleeX + (targetX - currentX[g]) * 0.1;
       currentY[g] += fleeY + (targetY - currentY[g]) * 0.1;
     }
+
+    // Accumulate actual pixel velocity from flee force only
+    let speedX = currentX[g] - prevX[g];
+    let speedY = currentY[g] - prevY[g];
+    // Only count if flee is active (mouse nearby)
+    if (fleeX !== 0 || fleeY !== 0) {
+      totalSpeed += sqrt(speedX * speedX + speedY * speedY);
+    }
+
     let hPulse = (mouseDist < 200) ? 450 : 350 + sin(frameCount * 0.05 + g) * 50;
     drawGroup(currentX[g], currentY[g], hPulse, directions[g]);
+  }
+
+  // Drive the continuous whoosh sound from real group movement speed
+  if (typeof updateSeparationSound === 'function') {
+    updateSeparationSound(totalSpeed);
   }
 }
 
@@ -206,6 +312,7 @@ function mousePressed() {
     currentX[g] = random(width);
     currentY[g] = random(height);
   }
+  if (typeof playReset === 'function') playReset();
 }
 
 
