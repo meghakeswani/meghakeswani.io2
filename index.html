@@ -1,18 +1,214 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/addons/p5.sound.min.js"></script>
-    
-    
-    
-    <link rel="stylesheet" type="text/css" href="style.css">
-    <meta charset="utf-8" />
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Can you spot yellow?</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,600;1,300;1,400&family=Cinzel+Decorative:wght@400&family=DM+Sans:wght@300;400&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      overflow: hidden;
+      background: #e8e8e8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100vw;
+      height: 100vh;
+    }
+    #wrapper {
+      position: relative;
+      width: 1200px;
+      height: 750px;
+      flex-shrink: 0;
+    }
+    canvas { display: block; }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 32px 40px 28px;
+    }
 
-  </head>
-  <body>
-    <main>
-    </main>
-    <script src="sketch.js"></script>
-  </body>
+    /* HEADER */
+    .header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      background: rgba(252,252,252,0.88);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      padding: 20px 48px 18px;
+      border-bottom: 2px solid #1b4e96;
+    }
+
+    .title {
+      font-family: 'Cinzel Decorative', serif;
+      font-size: 32px;
+      font-weight: 400;
+      color: #111;
+      letter-spacing: 0.04em;
+      line-height: 1;
+    }
+
+    .subtitle {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 300;
+      color: #1b4e96;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+    }
+
+    .subtitle span {
+      display: inline-block;
+      width: 20px;
+      text-align: center;
+      opacity: 0.4;
+    }
+
+    /* FOOTER */
+    .footer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      background: rgba(252,252,252,0.88);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      padding: 16px 48px 14px;
+      border-top: 1px solid rgba(17,17,17,0.15);
+    }
+
+    .artwork-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-style: italic;
+      font-size: 20px;
+      font-weight: 300;
+      color: #111;
+      letter-spacing: 0.02em;
+    }
+
+    .artwork-title em {
+      font-style: normal;
+      font-weight: 600;
+      color: #1b4e96;
+    }
+
+    .artist-name {
+      font-family: 'DM Sans', sans-serif;
+      font-size: 11px;
+      font-weight: 400;
+      color: #666;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+<div id="wrapper">
+<div id="overlay">
+  <div class="header">
+    <div class="title">Can you spot yellow?</div>
+    <div class="subtitle">
+      hover to disturb<span>&middot;</span>click outside to reset
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="artwork-title">Induction du <em>Jaune</em> Masnou &thinsp;&mdash;&thinsp; <span style="font-style:normal;font-weight:300">2014</span></div>
+    <div class="artist-name">Painting by Carlos Cruz-Diez</div>
+  </div>
+</div>
+</div>
+
+<script>
+let numLines = 41;
+let marginX = 120;
+let spacing;
+let originalX = [];
+let originalY;
+let directions = [-1, 1, -1, 1];
+let groupStarts = [7, 15, 23, 31];
+let currentX = [];
+let currentY = [];
+
+function setup() {
+  let cnv = createCanvas(1200, 750);
+  cnv.parent('wrapper');
+  spacing = (width - 2 * marginX) / (numLines - 1);
+  originalY = height / 2;
+  for (let g = 0; g < 4; g++) {
+    originalX[g] = marginX + (groupStarts[g] + 1) * spacing;
+    currentX[g] = originalX[g];
+    currentY[g] = originalY;
+  }
+  strokeCap(ROUND);
+}
+
+function draw() {
+  background(252, 252, 252, 30);
+
+  stroke('#1b4e96');
+  strokeWeight(8);
+  for (let i = 0; i < numLines; i++) {
+    let x = marginX + i * spacing;
+    line(x, 0, x, height);
+  }
+
+  for (let g = 0; g < 4; g++) {
+    let noiseVal = noise(frameCount * 0.01, g * 100);
+    let wanderX = map(noiseVal, 0, 1, -150, 150);
+    let wanderY = map(noise(g * 50, frameCount * 0.01), 0, 1, -150, 150);
+    let mouseDist = dist(mouseX, mouseY, currentX[g], currentY[g]);
+    let fleeX = 0, fleeY = 0;
+    if (mouseDist < 250) {
+      let angle = atan2(currentY[g] - mouseY, currentX[g] - mouseX);
+      fleeX = cos(angle) * (250 - mouseDist) * 0.5;
+      fleeY = sin(angle) * (250 - mouseDist) * 0.5;
+    }
+    let targetX = lerp(currentX[g], originalX[g] + wanderX, 0.02);
+    let targetY = lerp(currentY[g], originalY + wanderY, 0.02);
+    if (mouseDist > 400 && mouseX === pmouseX) {
+      currentX[g] = lerp(currentX[g], originalX[g], 0.05);
+      currentY[g] = lerp(currentY[g], originalY, 0.05);
+    } else {
+      currentX[g] += fleeX + (targetX - currentX[g]) * 0.1;
+      currentY[g] += fleeY + (targetY - currentY[g]) * 0.1;
+    }
+    let hPulse = (mouseDist < 200) ? 450 : 350 + sin(frameCount * 0.05 + g) * 50;
+    drawGroup(currentX[g], currentY[g], hPulse, directions[g]);
+  }
+}
+
+function drawGroup(x, y, h, dir) {
+  stroke('#111111');
+  strokeWeight(9);
+  noFill();
+  for (let i = 0; i < 3; i++) {
+    let xBase = x + (i - 1) * spacing;
+    let xBot = xBase + (dir * spacing);
+    let b1y = y - h * 0.1;
+    let b2y = y + h * 0.1;
+    line(xBase, y - h * 0.45, xBase, b1y);
+    line(xBase, b1y, xBot, b2y);
+    line(xBot, b2y, xBot, y + h * 0.45);
+  }
+}
+
+function mousePressed() {
+  for (let g = 0; g < 4; g++) {
+    currentX[g] = random(width);
+    currentY[g] = random(height);
+  }
+}
+
+
+</script>
+</body>
 </html>
